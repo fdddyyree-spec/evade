@@ -1,65 +1,53 @@
--- EVADE ULTIMATE - Оптимизированная версия
+-- EVADE ULTIMATE - Рабочая версия с автовоскрешением
 print("🎮 Загрузка Evade Ultimate...")
-
--- Защита от повторного запуска
-pcall(function()
-    if game:GetService("CoreGui"):FindFirstChild("EvadeUltimate") then
-        game:GetService("CoreGui"):FindFirstChild("EvadeUltimate"):Destroy()
-    end
-end)
 
 local Players = game:GetService("Players")
 local LP = Players.LocalPlayer
 local UIS = game:GetService("UserInputService")
 local RS = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- Настройки
 local Settings = {
     Speed = false,
     SpeedValue = 25,
-    Jump = false,
-    JumpValue = 60,
-    Bhop = false,
+    AutoRevive = false,
+    ReviveRadius = 100,
+    GodMode = false,
     ESP = false,
     Fullbright = false,
-    NoFog = false,
-    AutoSelfRevive = false,
-    AutoReviveOthers = false,
-    AutoCollectCoins = false,
-    Noclip = false,
-    BotIgnore = false,
-    GhostMode = false,
-    NoBots = false,
 }
 
-local AFKSettings = {
+local AFKMode = {
     Enabled = false,
     SafeZone = Vector3.new(0, 100, 0),
-    ReviveRadius = 100,
-    CoinRadius = 150,
-    BotDangerDistance = 25,
-    AutoHealThreshold = 50,
 }
 
 local revivedPlayers = {}
-local lastSelfRevive = 0
 
 -- Базовые функции
 local function GetChar()
-    return LP.Character and LP.Character.Parent and LP.Character or nil
+    return LP.Character
 end
 
 local function GetHum()
     local char = GetChar()
-    return char and char:FindFirstChildOfClass("Humanoid") or nil
+    return char and char:FindFirstChildOfClass("Humanoid")
 end
 
 local function GetRoot()
     local char = GetChar()
-    return char and (char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Torso")) or nil
+    return char and char:FindFirstChild("HumanoidRootPart")
 end
 
+-- Функция нажатия E
+local function PressE()
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+    wait(0.1)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+end
+
+-- Функция телепортации
 local function TeleportTo(position)
     local root = GetRoot()
     if root then
@@ -67,11 +55,12 @@ local function TeleportTo(position)
     end
 end
 
+-- Функция получения ботов
 local function GetBots()
     local bots = {}
     for _, v in pairs(workspace:GetDescendants()) do
-        if v:IsA("Model") and v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") then
-            if not Players:GetPlayerFromCharacter(v) then
+        if v:IsA("Model") and v.Name:lower():find("bot") or v.Name:lower():find("nextbot") then
+            if v:FindFirstChild("HumanoidRootPart") then
                 table.insert(bots, v)
             end
         end
@@ -79,17 +68,119 @@ local function GetBots()
     return bots
 end
 
-local function GetNearestBot()
-    local root = GetRoot()
-    if not root then return nil end
+-- Функция проверки мертвого игрока
+local function IsPlayerDead(player)
+    if not player.Character then return false end
     
+    local char = player.Character
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    
+    if not hum then return false end
+    
+    -- Проверяем разные состояния
+    if hum.Health <= 0 then return true end
+    if char:FindFirstChild("Downed") then return true end
+    if char:FindFirstChild("Ragdoll") then return true end
+    
+    return false
+end
+
+-- ГЛАВНАЯ ФУНКЦИЯ ВОСКРЕШЕНИЯ
+local function AutoRevive()
+    local myRoot = GetRoot()
+    if not myRoot then return end
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LP and player.Character then
+            if IsPlayerDead(player) then
+                local theirRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                
+                if theirRoot then
+                    local distance = (myRoot.Position - theirRoot.Position).Magnitude
+                    
+                    if distance < Settings.ReviveRadius then
+                        -- Проверяем не воскрешали ли недавно
+                        if not revivedPlayers[player.UserId] or tick() - revivedPlayers[player.UserId] > 30 then
+                            print("💚 Воскрешаем:", player.Name)
+                            
+                            -- Сохраняем позицию
+                            local originalPos = myRoot.CFrame
+                            
+                            -- Телепортируемся к игроку
+                            TeleportTo(theirRoot.Position + Vector3.new(0, 2, 2))
+                            wait(0.3)
+                            
+                            -- Жмем E несколько раз
+                            for i = 1, 5 do
+                                PressE()
+                                wait(0.2)
+                            end
+                            
+                            revivedPlayers[player.UserId] = tick()
+                            
+                            -- Возвращаемся
+                            wait(0.5)
+                            TeleportTo(originalPos.Position)
+                            
+                            game:GetService("StarterGui"):SetCore("SendNotification", {
+                                Title = "Revive";
+                                Text = "Воскресили: " .. player.Name;
+                                Duration = 2;
+                            })
+                            
+                            return
+                        end
+                    end
+                end
+            else
+                -- Игрок жив - убираем из списка
+                revivedPlayers[player.UserId] = nil
+            end
+        end
+    end
+end
+
+-- ЗАЩИТА ОТ БОТОВ
+local function ProtectFromBots()
+    local root = GetRoot()
+    if not root then return end
+    
+    for _, bot in pairs(GetBots()) do
+        local botRoot = bot:FindFirstChild("HumanoidRootPart")
+        if botRoot then
+            local distance = (botRoot.Position - root.Position).Magnitude
+            
+            -- Если бот близко - отталкиваем его
+            if distance < 30 then
+                local direction = (botRoot.Position - root.Position).Unit
+                botRoot.CFrame = CFrame.new(root.Position + direction * 100)
+            end
+        end
+    end
+end
+
+-- AFK РЕЖИМ
+local function AFKLoop()
+    local root = GetRoot()
+    local hum = GetHum()
+    
+    if not root or not hum then return end
+    
+    -- 1. Проверка здоровья
+    if hum.Health <= 0 then
+        print("💀 Мы мертвы, ждем...")
+        wait(5)
+        return
+    end
+    
+    -- 2. Защита от ботов
     local nearestBot = nil
     local shortestDistance = math.huge
     
     for _, bot in pairs(GetBots()) do
         local botRoot = bot:FindFirstChild("HumanoidRootPart")
         if botRoot then
-            local distance = (root.Position - botRoot.Position).Magnitude
+            local distance = (botRoot.Position - root.Position).Magnitude
             if distance < shortestDistance then
                 shortestDistance = distance
                 nearestBot = bot
@@ -97,221 +188,42 @@ local function GetNearestBot()
         end
     end
     
-    return nearestBot
-end
-
-local function GetCoins()
-    local coins = {}
-    for _, v in pairs(workspace:GetDescendants()) do
-        if v:IsA("BasePart") and (v.Name:lower():find("coin") or v.Name:lower():find("collectible")) then
-            table.insert(coins, v)
-        end
+    -- Если бот близко - убегаем
+    if nearestBot and shortestDistance < 25 then
+        print("⚠️ БОТ БЛИЗКО! Убегаем в безопасную зону...")
+        TeleportTo(AFKMode.SafeZone)
+        wait(3)
+        return
     end
-    return coins
+    
+    -- 3. Воскрешаем игроков
+    AutoRevive()
 end
 
--- Функции воскрешения (упрощенные)
-local function SelfRevive()
-    pcall(function()
-        local char = GetChar()
-        local hum = GetHum()
-        
-        if char and hum and hum.Health <= 0 then
-            local currentTime = tick()
-            
-            if currentTime - lastSelfRevive > 3 then
-                lastSelfRevive = currentTime
-                
-                for _, obj in pairs(char:GetDescendants()) do
-                    if obj:IsA("ProximityPrompt") and obj.Name:lower():find("revive") then
-                        fireproximityprompt(obj)
-                        break
-                    end
-                end
-            end
-        end
-    end)
-end
-
-local function ReviveOthers()
-    pcall(function()
-        local myRoot = GetRoot()
-        if not myRoot then return end
-        
-        for _, player in pairs(Players:GetPlayers()) do
-            if player ~= LP and player.Character then
-                local theirChar = player.Character
-                local theirHum = theirChar:FindFirstChildOfClass("Humanoid")
-                local theirRoot = theirChar:FindFirstChild("HumanoidRootPart")
-                
-                if theirHum and theirRoot and theirHum.Health <= 0 then
-                    local distance = (myRoot.Position - theirRoot.Position).Magnitude
-                    
-                    if distance < AFKSettings.ReviveRadius then
-                        if not revivedPlayers[player.UserId] or tick() - revivedPlayers[player.UserId] > 30 then
-                            local originalPos = myRoot.CFrame
-                            
-                            TeleportTo(theirRoot.Position + Vector3.new(0, 0, 3))
-                            wait(0.5)
-                            
-                            for _, obj in pairs(theirChar:GetDescendants()) do
-                                if obj:IsA("ProximityPrompt") and obj.Name:lower():find("revive") then
-                                    fireproximityprompt(obj)
-                                    revivedPlayers[player.UserId] = tick()
-                                    break
-                                end
-                            end
-                            
-                            wait(1)
-                            TeleportTo(originalPos.Position)
-                            return
-                        end
-                    end
-                else
-                    revivedPlayers[player.UserId] = nil
-                end
-            end
-        end
-    end)
-end
-
--- AFK Farm Mode
-local function AFKFarmMode()
-    pcall(function()
-        local root = GetRoot()
-        local hum = GetHum()
-        
-        if not root or not hum then return end
-        
-        -- 1. Проверка здоровья
-        if hum.Health <= 0 then
-            SelfRevive()
-            wait(2)
-            return
-        end
-        
-        -- 2. Лечение
-        if hum.Health < AFKSettings.AutoHealThreshold then
-            hum.Health = hum.MaxHealth
-        end
-        
-        -- 3. Проверка ботов
-        local nearestBot = GetNearestBot()
-        if nearestBot then
-            local botRoot = nearestBot:FindFirstChild("HumanoidRootPart")
-            if botRoot then
-                local distance = (root.Position - botRoot.Position).Magnitude
-                
-                if distance < AFKSettings.BotDangerDistance then
-                    TeleportTo(AFKSettings.SafeZone)
-                    wait(3)
-                    return
-                end
-            end
-        end
-        
-        -- 4. Воскрешение игроков
-        ReviveOthers()
-        
-        -- 5. Сбор монет
-        for _, coin in pairs(GetCoins()) do
-            local distance = (coin.Position - root.Position).Magnitude
-            
-            if distance < AFKSettings.CoinRadius then
-                firetouchinterest(root, coin, 0)
-                wait(0.05)
-                firetouchinterest(root, coin, 1)
-            end
-        end
-    end)
-end
-
--- Игровые циклы (оптимизированные)
+-- ИГРОВЫЕ ЦИКЛЫ
 spawn(function()
     while wait(0.1) do
-        pcall(function()
+        if Settings.Speed then
             local hum = GetHum()
-            local root = GetRoot()
-            
-            if Settings.Speed and hum and root then
+            if hum then
                 hum.WalkSpeed = Settings.SpeedValue
             end
-            
-            if Settings.Jump and hum then
-                if hum.UseJumpPower then
-                    hum.JumpPower = Settings.JumpValue
-                else
-                    hum.JumpHeight = Settings.JumpValue / 4
-                end
-            end
-        end)
-    end
-end)
-
-spawn(function()
-    while wait(0.05) do
-        if Settings.Bhop then
-            pcall(function()
-                local hum = GetHum()
-                if hum and UIS:IsKeyDown(Enum.KeyCode.Space) then
-                    local state = hum:GetState()
-                    if state ~= Enum.HumanoidStateType.Freefall then
-                        hum:ChangeState(Enum.HumanoidStateType.Jumping)
-                    end
-                end
-            end)
-        end
-    end
-end)
-
-spawn(function()
-    while wait(0.1) do
-        if Settings.Noclip then
-            pcall(function()
-                local char = GetChar()
-                if char then
-                    for _, part in pairs(char:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            part.CanCollide = false
-                        end
-                    end
-                end
-            end)
         end
     end
 end)
 
 spawn(function()
     while wait(1) do
-        if Settings.AutoSelfRevive then
-            SelfRevive()
+        if Settings.AutoRevive then
+            pcall(AutoRevive)
         end
     end
 end)
 
 spawn(function()
-    while wait(2) do
-        if Settings.AutoReviveOthers then
-            ReviveOthers()
-        end
-    end
-end)
-
-spawn(function()
-    while wait(0.5) do
-        if Settings.AutoCollectCoins then
-            pcall(function()
-                local root = GetRoot()
-                if root then
-                    for _, coin in pairs(GetCoins()) do
-                        if (coin.Position - root.Position).Magnitude < 100 then
-                            firetouchinterest(root, coin, 0)
-                            wait()
-                            firetouchinterest(root, coin, 1)
-                        end
-                    end
-                end
-            end)
+    while wait(0.2) do
+        if Settings.GodMode then
+            pcall(ProtectFromBots)
         end
     end
 end)
@@ -319,93 +231,24 @@ end)
 spawn(function()
     while wait(2) do
         if Settings.ESP then
-            pcall(function()
-                for _, player in pairs(Players:GetPlayers()) do
-                    if player ~= LP and player.Character then
-                        if not player.Character:FindFirstChild("ESP_Highlight") then
-                            local highlight = Instance.new("Highlight")
-                            highlight.Name = "ESP_Highlight"
-                            highlight.FillColor = Color3.fromRGB(255, 255, 255)
-                            highlight.FillTransparency = 0.5
-                            highlight.Parent = player.Character
-                        end
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= LP and player.Character then
+                    if not player.Character:FindFirstChild("ESP_Highlight") then
+                        local highlight = Instance.new("Highlight")
+                        highlight.Name = "ESP_Highlight"
+                        highlight.FillColor = Color3.fromRGB(255, 255, 255)
+                        highlight.FillTransparency = 0.5
+                        highlight.Parent = player.Character
                     end
                 end
-            end)
+            end
         else
-            pcall(function()
-                for _, player in pairs(Players:GetPlayers()) do
-                    if player.Character then
-                        local esp = player.Character:FindFirstChild("ESP_Highlight")
-                        if esp then esp:Destroy() end
-                    end
+            for _, player in pairs(Players:GetPlayers()) do
+                if player.Character then
+                    local esp = player.Character:FindFirstChild("ESP_Highlight")
+                    if esp then esp:Destroy() end
                 end
-            end)
-        end
-    end
-end)
-
-spawn(function()
-    while wait(0.2) do
-        if Settings.BotIgnore then
-            pcall(function()
-                local root = GetRoot()
-                if root then
-                    for _, bot in pairs(GetBots()) do
-                        local botRoot = bot:FindFirstChild("HumanoidRootPart")
-                        if botRoot then
-                            local distance = (botRoot.Position - root.Position).Magnitude
-                            if distance < 50 then
-                                local direction = (botRoot.Position - root.Position).Unit
-                                botRoot.CFrame = CFrame.new(root.Position + direction * 100)
-                            end
-                        end
-                    end
-                end
-            end)
-        end
-    end
-end)
-
-spawn(function()
-    while wait(0.3) do
-        if Settings.GhostMode then
-            pcall(function()
-                local char = GetChar()
-                local root = GetRoot()
-                
-                if char and root then
-                    if not char:FindFirstChild("Ghost") then
-                        local ghostTag = Instance.new("BoolValue")
-                        ghostTag.Name = "Ghost"
-                        ghostTag.Value = true
-                        ghostTag.Parent = char
-                    end
-                    
-                    for _, bot in pairs(GetBots()) do
-                        local botRoot = bot:FindFirstChild("HumanoidRootPart")
-                        if botRoot then
-                            local distance = (botRoot.Position - root.Position).Magnitude
-                            if distance < 30 then
-                                local direction = (botRoot.Position - root.Position).Unit
-                                botRoot.CFrame = CFrame.new(root.Position + direction * 50)
-                            end
-                        end
-                    end
-                end
-            end)
-        end
-    end
-end)
-
-spawn(function()
-    while wait(1) do
-        if Settings.NoBots then
-            pcall(function()
-                for _, bot in pairs(GetBots()) do
-                    bot:Destroy()
-                end
-            end)
+            end
         end
     end
 end)
@@ -413,71 +256,55 @@ end)
 spawn(function()
     while wait(1) do
         if Settings.Fullbright then
-            pcall(function()
-                local lighting = game:GetService("Lighting")
-                lighting.Brightness = 2
-                lighting.ClockTime = 14
-                lighting.GlobalShadows = false
-            end)
-        end
-    end
-end)
-
-spawn(function()
-    while wait(1) do
-        if Settings.NoFog then
-            pcall(function()
-                game:GetService("Lighting").FogEnd = 100000
-            end)
+            local lighting = game:GetService("Lighting")
+            lighting.Brightness = 2
+            lighting.ClockTime = 14
+            lighting.FogEnd = 100000
         end
     end
 end)
 
 spawn(function()
     while wait(0.5) do
-        if AFKSettings.Enabled then
-            AFKFarmMode()
+        if AFKMode.Enabled then
+            pcall(AFKLoop)
         end
     end
 end)
 
--- Публичные функции
-function StartAFKFarm()
-    AFKSettings.Enabled = true
+-- ПУБЛИЧНЫЕ ФУНКЦИИ
+function StartAFK()
+    AFKMode.Enabled = true
+    Settings.AutoRevive = true
+    Settings.GodMode = true
     Settings.Speed = true
     Settings.SpeedValue = 30
-    Settings.Jump = true
-    Settings.JumpValue = 70
-    Settings.AutoSelfRevive = true
-    Settings.GhostMode = true
-    Settings.BotIgnore = true
     Settings.ESP = true
     Settings.Fullbright = true
-    Settings.NoFog = true
     
-    print("✅ AFK Farm ВКЛЮЧЕН!")
+    print("✅ AFK режим ВКЛЮЧЕН!")
     game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "AFK Farm";
+        Title = "AFK Mode";
         Text = "Включен! Можете отойти";
         Duration = 5;
     })
 end
 
-function StopAFKFarm()
-    AFKSettings.Enabled = false
-    print("❌ AFK Farm ВЫКЛЮЧЕН!")
+function StopAFK()
+    AFKMode.Enabled = false
+    print("❌ AFK режим ВЫКЛЮЧЕН!")
     game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "AFK Farm";
+        Title = "AFK Mode";
         Text = "Выключен";
         Duration = 3;
     })
 end
 
-function SetCurrentPositionAsSafeZone()
+function SetSafeZone()
     local root = GetRoot()
     if root then
-        AFKSettings.SafeZone = root.Position
-        print("✅ Безопасная зона установлена:", root.Position)
+        AFKMode.SafeZone = root.Position
+        print("✅ Безопасная зона:", root.Position)
         game:GetService("StarterGui"):SetCore("SendNotification", {
             Title = "Safe Zone";
             Text = "Позиция сохранена!";
@@ -486,20 +313,11 @@ function SetCurrentPositionAsSafeZone()
     end
 end
 
-function TeleportToSafeZone()
-    TeleportTo(AFKSettings.SafeZone)
+function GoToSafeZone()
+    TeleportTo(AFKMode.SafeZone)
 end
 
-function RemoveAllBots()
-    local count = 0
-    for _, bot in pairs(GetBots()) do
-        bot:Destroy()
-        count = count + 1
-    end
-    return count
-end
-
--- GUI (упрощенный и оптимизированный)
+-- GUI
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "EvadeUltimate"
 ScreenGui.ResetOnSpawn = false
@@ -513,8 +331,8 @@ if not ScreenGui.Parent then
 end
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 400, 0, 450)
-MainFrame.Position = UDim2.new(0.5, -200, 0.5, -225)
+MainFrame.Size = UDim2.new(0, 350, 0, 400)
+MainFrame.Position = UDim2.new(0.5, -175, 0.5, -200)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 MainFrame.BorderSizePixel = 2
 MainFrame.BorderColor3 = Color3.fromRGB(60, 60, 70)
@@ -524,9 +342,9 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 35)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
 Title.BorderSizePixel = 0
-Title.Text = "Evade Ultimate"
+Title.Text = "Evade Ultimate - AFK Revive"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 16
+Title.TextSize = 14
 Title.Font = Enum.Font.GothamBold
 Title.Parent = MainFrame
 
@@ -564,7 +382,7 @@ end)
 
 local function CreateButton(text, callback)
     local Button = Instance.new("TextButton")
-    Button.Size = UDim2.new(1, -10, 0, 30)
+    Button.Size = UDim2.new(1, -10, 0, 35)
     Button.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
     Button.Text = text
     Button.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -579,7 +397,7 @@ end
 
 local function CreateToggle(text, setting)
     local Frame = Instance.new("Frame")
-    Frame.Size = UDim2.new(1, -10, 0, 30)
+    Frame.Size = UDim2.new(1, -10, 0, 35)
     Frame.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
     Frame.BorderSizePixel = 0
     Frame.Parent = ContentFrame
@@ -615,44 +433,77 @@ local function CreateToggle(text, setting)
     return Frame
 end
 
--- Создание элементов GUI
-CreateButton("🤖 START AFK FARM", function()
-    SetCurrentPositionAsSafeZone()
-    StartAFKFarm()
+-- Создание элементов
+CreateButton("🤖 START AFK MODE", function()
+    SetSafeZone()
+    StartAFK()
 end)
 
-CreateButton("❌ STOP AFK FARM", function()
-    StopAFKFarm()
+CreateButton("❌ STOP AFK MODE", function()
+    StopAFK()
 end)
 
 CreateButton("📍 Set Safe Zone", function()
-    SetCurrentPositionAsSafeZone()
+    SetSafeZone()
 end)
 
+CreateButton("🚀 Go to Safe Zone", function()
+    GoToSafeZone()
+end)
+
+CreateToggle("💚 Auto Revive", "AutoRevive")
+CreateToggle("🛡️ God Mode (Bot Protection)", "GodMode")
 CreateToggle("⚡ Speed", "Speed")
-CreateToggle("🦘 Jump", "Jump")
-CreateToggle("🔄 Bhop", "Bhop")
 CreateToggle("👁️ ESP", "ESP")
 CreateToggle("💡 Fullbright", "Fullbright")
-CreateToggle("🌫️ No Fog", "NoFog")
-CreateToggle("💚 Auto Self Revive", "AutoSelfRevive")
-CreateToggle("💚 Auto Revive Others", "AutoReviveOthers")
-CreateToggle("💰 Auto Collect Coins", "AutoCollectCoins")
-CreateToggle("👻 Noclip", "Noclip")
-CreateToggle("🤖 Bot Ignore", "BotIgnore")
-CreateToggle("👻 Ghost Mode", "GhostMode")
-CreateToggle("🚫 No Bots", "NoBots")
 
-CreateButton("🚀 Teleport to Safe Zone", function()
-    TeleportToSafeZone()
-end)
-
-CreateButton("🤖 Remove All Bots", function()
-    local count = RemoveAllBots()
+CreateButton("🔍 Test Revive", function()
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("🔍 ТЕСТ СИСТЕМЫ")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    print("\n👥 Проверка игроков:")
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LP and player.Character then
+            local isDead = IsPlayerDead(player)
+            local theirRoot = player.Character:FindFirstChild("HumanoidRootPart")
+            
+            if theirRoot then
+                local myRoot = GetRoot()
+                local distance = myRoot and (myRoot.Position - theirRoot.Position).Magnitude or 999
+                
+                print(string.format("  👤 %s - Dead: %s, Distance: %.1f", 
+                    player.Name, 
+                    tostring(isDead), 
+                    distance
+                ))
+            end
+        end
+    end
+    
+    print("\n🤖 Проверка ботов:")
+    local bots = GetBots()
+    print("  Найдено ботов: " .. #bots)
+    
+    if #bots > 0 then
+        local myRoot = GetRoot()
+        if myRoot then
+            for _, bot in pairs(bots) do
+                local botRoot = bot:FindFirstChild("HumanoidRootPart")
+                if botRoot then
+                    local distance = (myRoot.Position - botRoot.Position).Magnitude
+                    print(string.format("  🤖 %s - Distance: %.1f", bot.Name, distance))
+                end
+            end
+        end
+    end
+    
+    print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
     game:GetService("StarterGui"):SetCore("SendNotification", {
-        Title = "Bots";
-        Text = "Удалено: " .. count;
-        Duration = 2;
+        Title = "Test";
+        Text = "Проверьте консоль (F9)";
+        Duration = 3;
     })
 end)
 
@@ -681,7 +532,6 @@ UIS.InputChanged:Connect(function(input)
     end
 end)
 
--- Открытие/закрытие
 UIS.InputBegan:Connect(function(input, gameProcessed)
     if not gameProcessed and input.KeyCode == Enum.KeyCode.RightShift then
         MainFrame.Visible = not MainFrame.Visible
@@ -689,7 +539,8 @@ UIS.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 print("✅ Evade Ultimate загружен!")
-print("📋 Нажмите Right Shift чтобы открыть GUI")
+print("📋 Right Shift = открыть GUI")
+print("💚 Нажмите START AFK MODE для автовоскрешения")
 
 game:GetService("StarterGui"):SetCore("SendNotification", {
     Title = "Evade Ultimate";
