@@ -68,7 +68,7 @@ local function GetBots()
     return bots
 end
 
--- Функция проверки мертвого игрока
+-- Функция проверки мертвого игрока (улучшенная)
 local function IsPlayerDead(player)
     if not player.Character then return false end
     
@@ -77,83 +77,135 @@ local function IsPlayerDead(player)
     
     if not hum then return false end
     
-    -- Проверяем разные состояния
+    -- Проверяем все возможные состояния смерти
     if hum.Health <= 0 then return true end
+    if hum.Health < hum.MaxHealth * 0.1 then return true end -- Почти мертв
     if char:FindFirstChild("Downed") then return true end
     if char:FindFirstChild("Ragdoll") then return true end
+    if char:FindFirstChild("Dead") then return true end
+    
+    -- Проверяем состояние Humanoid
+    local state = hum:GetState()
+    if state == Enum.HumanoidStateType.Dead then return true end
+    if state == Enum.HumanoidStateType.Physics then return true end
+    
+    -- Проверяем есть ли ProximityPrompt для воскрешения
+    for _, obj in pairs(char:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") then
+            local name = obj.Name:lower()
+            if name:find("revive") or name:find("help") or name:find("heal") then
+                return true
+            end
+        end
+    end
     
     return false
 end
 
--- ГЛАВНАЯ ФУНКЦИЯ ВОСКРЕШЕНИЯ
+-- ГЛАВНАЯ ФУНКЦИЯ ВОСКРЕШЕНИЯ (улучшенная)
 local function AutoRevive()
     local myRoot = GetRoot()
     if not myRoot then return end
     
+    -- Ищем мертвых игроков
+    local deadPlayers = {}
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LP and player.Character then
             if IsPlayerDead(player) then
                 local theirRoot = player.Character:FindFirstChild("HumanoidRootPart")
-                
                 if theirRoot then
                     local distance = (myRoot.Position - theirRoot.Position).Magnitude
-                    
                     if distance < Settings.ReviveRadius then
-                        -- Проверяем не воскрешали ли недавно
-                        if not revivedPlayers[player.UserId] or tick() - revivedPlayers[player.UserId] > 30 then
-                            print("💚 Воскрешаем:", player.Name)
-                            
-                            -- Сохраняем позицию
-                            local originalPos = myRoot.CFrame
-                            
-                            -- Телепортируемся к игроку
-                            TeleportTo(theirRoot.Position + Vector3.new(0, 2, 2))
-                            wait(0.3)
-                            
-                            -- Жмем E несколько раз
-                            for i = 1, 5 do
-                                PressE()
-                                wait(0.2)
-                            end
-                            
-                            revivedPlayers[player.UserId] = tick()
-                            
-                            -- Возвращаемся
-                            wait(0.5)
-                            TeleportTo(originalPos.Position)
-                            
-                            game:GetService("StarterGui"):SetCore("SendNotification", {
-                                Title = "Revive";
-                                Text = "Воскресили: " .. player.Name;
-                                Duration = 2;
-                            })
-                            
-                            return
-                        end
+                        table.insert(deadPlayers, {player = player, distance = distance, root = theirRoot})
                     end
                 end
             else
-                -- Игрок жив - убираем из списка
                 revivedPlayers[player.UserId] = nil
             end
         end
     end
+    
+    -- Сортируем по расстоянию (ближайший первый)
+    table.sort(deadPlayers, function(a, b) return a.distance < b.distance end)
+    
+    -- Воскрешаем ближайшего
+    for _, data in ipairs(deadPlayers) do
+        local player = data.player
+        local theirRoot = data.root
+        
+        -- Проверяем не воскрешали ли недавно
+        if not revivedPlayers[player.UserId] or tick() - revivedPlayers[player.UserId] > 20 then
+            print("💚 Воскрешаем:", player.Name, "Distance:", math.floor(data.distance))
+            
+            -- Сохраняем позицию
+            local originalPos = myRoot.CFrame
+            
+            -- Телепортируемся ПРЯМО к игроку
+            for i = 1, 3 do
+                TeleportTo(theirRoot.Position + Vector3.new(0, 1, 1))
+                wait(0.2)
+            end
+            
+            -- Жмем E много раз
+            print("🔧 Жмем E...")
+            for i = 1, 10 do
+                PressE()
+                wait(0.15)
+            end
+            
+            revivedPlayers[player.UserId] = tick()
+            
+            -- Возвращаемся
+            wait(0.3)
+            TeleportTo(originalPos.Position)
+            
+            game:GetService("StarterGui"):SetCore("SendNotification", {
+                Title = "Revive";
+                Text = "Воскресили: " .. player.Name;
+                Duration = 2;
+            })
+            
+            return -- Воскрешаем по одному за раз
+        end
+    end
 end
 
--- ЗАЩИТА ОТ БОТОВ
+-- ЗАЩИТА ОТ БОТОВ (улучшенная)
 local function ProtectFromBots()
     local root = GetRoot()
-    if not root then return end
+    local char = GetChar()
+    if not root or not char then return end
     
+    -- Делаем персонажа невидимым для ботов
+    for _, part in pairs(char:GetDescendants()) do
+        if part:IsA("BasePart") then
+            -- Делаем части прозрачными для ботов
+            part.CanCollide = false
+            
+            -- Добавляем тег Ghost
+            if not char:FindFirstChild("GhostMode") then
+                local ghost = Instance.new("BoolValue")
+                ghost.Name = "GhostMode"
+                ghost.Parent = char
+            end
+        end
+    end
+    
+    -- Отталкиваем ботов
     for _, bot in pairs(GetBots()) do
         local botRoot = bot:FindFirstChild("HumanoidRootPart")
         if botRoot then
             local distance = (botRoot.Position - root.Position).Magnitude
             
-            -- Если бот близко - отталкиваем его
-            if distance < 30 then
+            -- Если бот близко - отталкиваем его ДАЛЕКО
+            if distance < 40 then
                 local direction = (botRoot.Position - root.Position).Unit
-                botRoot.CFrame = CFrame.new(root.Position + direction * 100)
+                botRoot.CFrame = CFrame.new(root.Position + direction * 200)
+                
+                -- Удаляем бота если слишком близко
+                if distance < 15 then
+                    bot:Destroy()
+                end
             end
         end
     end
@@ -213,7 +265,7 @@ spawn(function()
 end)
 
 spawn(function()
-    while wait(1) do
+    while wait(0.5) do
         if Settings.AutoRevive then
             pcall(AutoRevive)
         end
@@ -221,7 +273,7 @@ spawn(function()
 end)
 
 spawn(function()
-    while wait(0.2) do
+    while wait(0.1) do
         if Settings.GodMode then
             pcall(ProtectFromBots)
         end
@@ -449,6 +501,11 @@ end)
 
 CreateButton("🚀 Go to Safe Zone", function()
     GoToSafeZone()
+end)
+
+CreateButton("💚 Revive NOW (Manual)", function()
+    print("🔧 Ручное воскрешение...")
+    AutoRevive()
 end)
 
 CreateToggle("💚 Auto Revive", "AutoRevive")
