@@ -102,12 +102,12 @@ local function IsPlayerDead(player)
     return false
 end
 
--- ГЛАВНАЯ ФУНКЦИЯ ВОСКРЕШЕНИЯ (улучшенная)
+-- ГЛАВНАЯ ФУНКЦИЯ ВОСКРЕШЕНИЯ (по всей карте)
 local function AutoRevive()
     local myRoot = GetRoot()
     if not myRoot then return end
     
-    -- Ищем мертвых игроков
+    -- Ищем ВСЕХ мертвых игроков (без ограничения по расстоянию)
     local deadPlayers = {}
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LP and player.Character then
@@ -115,14 +115,16 @@ local function AutoRevive()
                 local theirRoot = player.Character:FindFirstChild("HumanoidRootPart")
                 if theirRoot then
                     local distance = (myRoot.Position - theirRoot.Position).Magnitude
-                    if distance < Settings.ReviveRadius then
-                        table.insert(deadPlayers, {player = player, distance = distance, root = theirRoot})
-                    end
+                    table.insert(deadPlayers, {player = player, distance = distance, root = theirRoot})
                 end
             else
                 revivedPlayers[player.UserId] = nil
             end
         end
+    end
+    
+    if #deadPlayers > 0 then
+        print(string.format("🔍 Найдено мертвых игроков: %d", #deadPlayers))
     end
     
     -- Сортируем по расстоянию (ближайший первый)
@@ -135,7 +137,7 @@ local function AutoRevive()
         
         -- Проверяем не воскрешали ли недавно
         if not revivedPlayers[player.UserId] or tick() - revivedPlayers[player.UserId] > 20 then
-            print("💚 Воскрешаем:", player.Name, "Distance:", math.floor(data.distance))
+            print(string.format("💚 Воскрешаем: %s (Distance: %d studs)", player.Name, math.floor(data.distance)))
             
             -- Сохраняем позицию
             local originalPos = myRoot.CFrame
@@ -147,7 +149,7 @@ local function AutoRevive()
             end
             
             -- Жмем E много раз
-            print("🔧 Жмем E...")
+            print("🔧 Жмем E для воскрешения...")
             for i = 1, 10 do
                 PressE()
                 wait(0.15)
@@ -158,6 +160,8 @@ local function AutoRevive()
             -- Возвращаемся
             wait(0.3)
             TeleportTo(originalPos.Position)
+            
+            print("✅ Воскрешение завершено, возвращаемся")
             
             game:GetService("StarterGui"):SetCore("SendNotification", {
                 Title = "Revive";
@@ -394,7 +398,7 @@ local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, 0, 0, 35)
 Title.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
 Title.BorderSizePixel = 0
-Title.Text = "Evade Ultimate - AFK Revive"
+Title.Text = "Evade Ultimate - Global Revive"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.TextSize = 14
 Title.Font = Enum.Font.GothamBold
