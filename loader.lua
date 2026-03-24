@@ -22,7 +22,7 @@ end
 local SupportedGames = {
     -- Evade
     [9872472334] = function()
-        LoadFromGitHub("https://raw.githubusercontent.com/artemviktorov55-ai/EvadeXeno/refs/heads/main/evade_ultimate.lua")
+        LoadFromGitHub("https://raw.githubusercontent.com/fdddyyree-spec/evade/refs/heads/main/evade_ultimate.lua")
     end,
 }
 
